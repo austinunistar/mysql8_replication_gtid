@@ -96,17 +96,30 @@
   vars:
      root_password: 'finicast'
      mysql_root_pass: 'finicast'
+     mysql_user_pass: 'finicast'
      
   tasks:
-  - name: set the replica server to the read_only state
-    ansible.builtin.shell: |
-            mysql -uroot -pfinicast -e "SET @@GLOBAL.read_only = ON;"
+          #  - name: set the replica server to the read_only state
+          #    ansible.builtin.shell: |
+          #            mysql -uroot -pfinicast -e "SET @@GLOBAL.read_only = ON;"
+          #
+          #  - name: configure the replication source
+          #    ansible.builtin.shell: |
+          #            mysql -uroot -pfinicast -e "CHANGE REPLICATION SOURCE TO SOURCE_HOST='192.168.56.13',SOURCE_USER='repl',SOURCE_PASSWORD='finicast',SOURCE_AUTO_POSITION=1;"
+          #
+          #  - name: start the replica thread in the MySQL replica server
+          #    ansible.builtin.shell: |
+          #            mysql -uroot -pfinicast -e "START SLAVE;"
 
-  - name: configure the replication source
-    ansible.builtin.shell: |
-            mysql -uroot -pfinicast -e "CHANGE REPLICATION SOURCE TO SOURCE_HOST='192.168.56.13',SOURCE_USER='repl',SOURCE_PASSWORD='finicast',SOURCE_AUTO_POSITION=0;"
-
-  - name: start the replica thread in the MySQL replica server
-    ansible.builtin.shell: |
-            mysql -uroot -pfinicast -e "START SLAVE;"
-
+  - name: setup Mysql replication
+    community.mysql.mysql_replication:
+      login_user: root
+      login_password: "{{ mysql_root_pass }}"
+      mode: changeprimary
+      primary_auto_position: yes
+      primary_host: "192.168.56.13"
+      primary_port: "3306"
+      primary_user: "repl"
+      primary_password: "{{ mysql_user_pass }}"
+    register: result_mysql
+    tags: change_primary
