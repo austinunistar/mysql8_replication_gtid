@@ -1,0 +1,112 @@
+---
+- hosts: mysql-1
+  become: true
+  vars:
+     root_password: 'finicast'
+     mysql_root_pass: 'finicast'
+     
+  tasks:
+  - name: configure a MySQL source server
+    ansible.builtin.lineinfile:
+      path: '/etc/mysql/mysql.conf.d/mysqld.cnf'
+      regexp: 'log-error'
+      line: "{{ item }}"
+      backup: yes
+    loop:
+      - bind-address=192.168.56.13
+      - server-id=1
+      - log_bin=/var/log/mysql/mysql-bin.log
+      - gtid_mode=ON
+      - enforce-gtid-consistency=ON
+
+  - name: restart mysql service
+    ansible.builtin.service:
+      name: mysql
+      state: restarted
+      enabled: yes
+
+- hosts: mysql-2
+  become: true
+  vars:
+     root_password: 'finicast'
+     mysql_root_pass: 'finicast'
+     
+  tasks:
+  - name: configure a MySQL replica server
+    ansible.builtin.lineinfile:
+      path: '/etc/mysql/mysql.conf.d/mysqld.cnf'
+      regexp: 'log-error'
+      line: "{{ item }}"
+      backup: yes
+    loop:
+      - bind-address=192.168.56.14
+      - server-id=2
+      - log_bin=/var/log/mysql/mysql-bin.log
+      - gtid_mode=ON
+      - enforce-gtid-consistency=ON
+      - log-replica-updates=ON
+      - skip-replica-start=ON
+
+  - name: restart mysql service
+    ansible.builtin.service:
+      name: mysql
+      state: restarted
+      enabled: yes
+
+- hosts: mysql-1
+  become: true
+  vars:
+     root_password: 'finicast'
+     mysql_root_pass: 'finicast'
+     mysql_user_pass: 'finicast'
+     user: 'repl'
+  tasks:
+          #  - name: create a replication user on the MySQL source server
+          #    ansible.builtin.shell: |
+          #            mysql -uroot -pfinicast -e "CREATE USER 'repl'@'192.168.56.14' IDENTIFIED WITH IDENTIFIED WITH sha256_password BY 'password';"
+          #  
+          #  - name: grant the user replication permissions
+          #    ansible.builtin.shell: |
+          #            mysql -uroot -pfinicast -e "GRANT REPLICATION SLAVE ON *.* TO 'repl'@'192.168.56.14';"
+
+  - name: create a replication user on the MySQL source server
+    ansible.builtin.mysql_user:
+      login_user: root
+      login_password: "{{ mysql_root_pass }}"
+      name: "{{ user }}"
+      password: "{{ mysql_user_pass }}"
+      host: localhost
+      state: present
+      update_password: on_create
+      priv: "*.*:REPLICATION SLAVE"
+      login_unix_socket: /var/run/mysqld/mysqld.sock
+    no_log: true
+    tags: create_user
+
+  - name: reload the grant tables in the MySQL database
+    ansible.builtin.shell: |
+            mysql -uroot -pfinicast -e "FLUSH PRIVILEGES;"
+
+  - name: set the source server to the read_only state
+    ansible.builtin.shell: |
+            mysql -uroot -pfinicast -e "SET @@GLOBAL.read_only = ON;"
+
+- hosts: mysql-2
+  become: true
+  vars:
+     root_password: 'finicast'
+     mysql_root_pass: 'finicast'
+     
+  tasks:
+  - name: set the replica server to the read_only state
+    ansible.builtin.shell: |
+            mysql -uroot -pfinicast -e "SET @@GLOBAL.read_only = ON;"
+
+  - name: configure the replication source
+    ansible.builtin.shell: |
+            mysql -uroot -pfinicast -e "CHANGE REPLICATION SOURCE TO SOURCE_HOST='192.168.56.13',SOURCE_USER='repl',SOURCE_PASSWORD='finicast',SOURCE_AUTO_POSITION=0;"
+
+  - name: start the replica thread in the MySQL replica server
+    ansible.builtin.shell: |
+            mysql -uroot -pfinicast -e "START SLAVE;"
+
