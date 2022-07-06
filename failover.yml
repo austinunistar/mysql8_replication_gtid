@@ -1,0 +1,101 @@
+---
+- hosts: mysql-1
+  become: true
+     
+  tasks:
+  - name: stop mysql service
+    ansible.builtin.service:
+      name: mysql
+      state: stopped
+
+- hosts: mysql-2
+  become: true
+  vars:
+     root_password: 'finicast'
+     mysql_root_pass: 'finicast'
+     
+  tasks:
+  - name: stop slave replication
+    ansible.builtin.shell: |
+            mysql -uroot -p{{ mysql_root_pass }} -e "STOP SLAVE;"
+
+  - name: create new table with test
+    ansible.builtin.shell: |
+            mysql -uroot -p{{ mysql_root_pass }} -e "USE test; CREATE TABLE lab_tbl( lab_id INT NOT NULL AUTO_INCREMENT, lab_title VARCHAR(100) NOT NULL, lab_author VARCHAR(40) NOT NULL, submission_date DATE, PRIMARY KEY ( lab_id ) );"
+    ignore_errors: yes
+
+- hosts: mysql-1
+  become: true
+  vars:
+     root_password: 'finicast'
+     mysql_root_pass: 'finicast'
+  tasks:
+  - name: start mysql service
+    ansible.builtin.service:
+      name: mysql
+      state: started
+
+- hosts: mysql-2
+  become: true
+  vars:
+     root_password: 'finicast'
+     mysql_root_pass: 'finicast'
+     
+  tasks:
+  - name: lock mysql table
+    ansible.builtin.shell: |
+            mysql -uroot -p{{ mysql_root_pass }} -e "FLUSH TABLES WITH READ LOCK;"
+
+  - name: go dump-data on slave host
+    ansible.builtin.shell: |
+            mysqldump -uroot -p{{ mysql_root_pass }} --all-databases --triggers --routines --events > /tmp/database_dump.sql
+    ignore_errors: yes
+
+- hosts: mysql-2
+  become: true
+  vars:
+     root_password: 'finicast'
+     mysql_root_pass: 'finicast'
+  tasks:
+  - name: fetch dump-data from the slave to local
+    run_once: yes
+    fetch: 
+      src: /tmp/database_dump.sql
+      dest: /tmp/database_dump.sql
+      flat: yes
+      remote_src: yes
+
+- hosts: mysql-1
+  become: true
+  vars:
+     root_password: 'finicast'
+     mysql_root_pass: 'finicast'
+  tasks:
+  - name: copy dump-data from local to master
+    copy: 
+      src: /tmp/database_dump.sql
+      dest: /tmp/database_dump.sql
+
+  - name: reset master data
+    ansible.builtin.shell: |
+            mysql -uroot -p{{ mysql_root_pass }} -e "reset master;"
+  
+  - name: restore dump-data on master host
+    ansible.builtin.shell: |
+            mysql -uroot -p{{ mysql_root_pass }} < /tmp/database_dump.sql
+            #    ignore_errors: yes
+
+- hosts: mysql-2
+  become: true
+  vars:
+     root_password: 'finicast'
+     mysql_root_pass: 'finicast'
+  tasks:
+  - name: unlock all the tables
+    ansible.builtin.shell: |
+            mysql -uroot -p{{ mysql_root_pass }} -e "unlock tables;"
+
+  - name: start slave replication
+    ansible.builtin.shell: |
+            mysql -uroot -p{{ mysql_root_pass }} -e "start slave;"
+
