@@ -97,5 +97,5 @@
   - name: create new database with test
     ansible.builtin.shell: |
             mysql -uroot -p{{ mysql_root_pass }} -e "create database test;"
-    tags: test3
+    tags: testdb_create
     ignore_errors: yes
